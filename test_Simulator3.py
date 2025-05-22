@@ -39,15 +39,15 @@ import pickle
 RANDOM_OBSTACLE_SEED = 1
 current_obstacle_seed = RANDOM_OBSTACLE_SEED
 
-NUM_OBSTACLES = 60
+NUM_OBSTACLES = 80
 AREA_SIZE = 100
-AGENT_SPEED = 20
-MANUAL_AGENT_SPEED = 20
+AGENT_SPEED = 30
+MANUAL_AGENT_SPEED = 30
 ROTATION_SPEED = 200
 AGENT_HEIGHT = 0.5
 LIDAR_RANGE = 30
 LIDAR_FOV = 360
-NUM_LIDAR_RAYS = 144
+NUM_LIDAR_RAYS = 180
 LIDAR_VERTICAL_FOV = 45
 NUM_LIDAR_CHANNELS = 8
 LIDAR_VIS_HEIGHT = 0.6
@@ -56,6 +56,10 @@ OBSTACLE_TAG = "obstacle"
 SCAN_INTERVAL = 0.5
 MANUAL_SCAN_INTERVAL = 1.0
 VISUALIZE_LIDAR_RAYS = False
+
+# --- 라이다 노이즈 설정 ---
+LIDAR_NOISE_ENABLED = True # True로 변경하여 노이즈 활성화
+LIDAR_NOISE_LEVEL = 0.05    # 각 좌표에 더해지거나 빼질 최대 노이즈 값 (월드 단위)
 
 min_obstacle_distance_from_spawn = 3.0
 max_placement_attempts_per_obstacle = 100
@@ -490,7 +494,7 @@ def update_lidar_visualization():
         h_angle_start_world_deg=agent_rot_y_deg-LIDAR_FOV/2
         for i in range(NUM_LIDAR_RAYS):
             h_angle_world_deg=h_angle_start_world_deg+i*h_angle_step
-            h_angle_world_rad=math.radians(h_angle_world_deg) # 여기가 수정되어야 함
+            h_angle_world_rad=math.radians(h_angle_world_deg)
             cos_h=math.cos(h_angle_world_rad); sin_h=math.sin(h_angle_world_rad)
             direction=Vec3(cos_v*sin_h,sin_v,cos_v*cos_h).normalized()
             hit_info=raycast(lidar_origin_world,direction,LIDAR_RANGE,ignore=[agent, ground],debug=False,traverse_target=scene)
@@ -502,7 +506,7 @@ def update_lidar_visualization():
             else: end_point=lidar_origin_world+direction*LIDAR_RANGE; line_color=LIDAR_COLOR
             if distance(lidar_origin_world,end_point)>0.01: lidar_lines.append(Entity(model=Mesh(vertices=[lidar_origin_world,end_point],mode='line',thickness=1),color=line_color,alpha=0.7))
 
-# --- 3D 라이다 스캔 및 상대 좌표 데이터 생성 함수 (수정됨) ---
+# --- 3D 라이다 스캔 및 상대 좌표 데이터 생성 함수 (노이즈 추가 기능 포함) ---
 def generate_relative_lidar_map_3d_at_pose(scan_agent_world_pos, scan_agent_world_rotation_y_deg):
     relative_points_3d=[]
     agent_pos_world = scan_agent_world_pos
@@ -519,12 +523,24 @@ def generate_relative_lidar_map_3d_at_pose(scan_agent_world_pos, scan_agent_worl
 
         for i in range(NUM_LIDAR_RAYS):
             h_angle_world_deg=h_angle_start_world_deg+i*h_angle_step
-            h_angle_world_rad=math.radians(h_angle_world_deg) # 오류 수정: h_angle_world_deg를 사용
+            h_angle_world_rad=math.radians(h_angle_world_deg)
             cos_h=math.cos(h_angle_world_rad); sin_h=math.sin(h_angle_world_rad)
             direction=Vec3(cos_v*sin_h,sin_v,cos_v*cos_h).normalized()
             hit_info=raycast(scan_origin_world,direction,LIDAR_RANGE,ignore=[agent,],debug=False,traverse_target=scene)
             if hit_info.hit:
-                hit_point_world=hit_info.world_point; world_vec=hit_point_world-agent_pos_world
+                hit_point_world=hit_info.world_point
+                
+                # --- 노이즈 추가 로직 ---
+                if LIDAR_NOISE_ENABLED:
+                    noise_x = random.uniform(-LIDAR_NOISE_LEVEL, LIDAR_NOISE_LEVEL)
+                    noise_y = random.uniform(-LIDAR_NOISE_LEVEL, LIDAR_NOISE_LEVEL)
+                    noise_z = random.uniform(-LIDAR_NOISE_LEVEL, LIDAR_NOISE_LEVEL)
+                    hit_point_world = Vec3(hit_point_world.x + noise_x,
+                                           hit_point_world.y + noise_y,
+                                           hit_point_world.z + noise_z)
+                # --- 노이즈 추가 로직 끝 ---
+
+                world_vec=hit_point_world-agent_pos_world
 
                 cos_a=math.cos(-agent_rot_y_rad); sin_a=math.sin(-agent_rot_y_rad)
                 relative_x=world_vec.x*cos_a-world_vec.z*sin_a; relative_y=world_vec.y; relative_z=world_vec.x*sin_a+world_vec.z*cos_a
@@ -702,13 +718,12 @@ def evaluate_and_plot_algorithms(history, current_gt_obstacle_df, gnd_info, show
                 if y_scale_factor_algo != 1.0 and algorithm_name in ["DBSCAN", "HDBSCAN"]: # Y 스케일링은 DBSCAN, HDBSCAN에만 적용
                     points_for_algo_input[:, 1] *= y_scale_factor_algo
 
-                # --- 시각화 수정: current_eval_method가 "2D_AREA_OVERLAP_RATIO"일 때만 플롯 생성 ---
                 should_generate_plot_for_this_iteration = show_plots and (current_eval_method == "2D_AREA_OVERLAP_RATIO")
                 fig_algo = None
-                ax1, ax2, ax3 = None, None, None # 미리 None으로 초기화
+                ax1, ax2, ax3 = None, None, None 
 
                 if should_generate_plot_for_this_iteration:
-                    fig_algo=plt.figure(figsize=(24,8.5)) # figsize 조정 가능
+                    fig_algo=plt.figure(figsize=(24,8.5)) 
                     fig_algo.suptitle(f'3D LiDAR Mapping - Algorithm: {algorithm_name} & Performance (Eval: {current_eval_method})',fontsize=16)
 
                     ax1=fig_algo.add_subplot(131,projection='3d')
@@ -724,15 +739,15 @@ def evaluate_and_plot_algorithms(history, current_gt_obstacle_df, gnd_info, show
 
                     ax2=fig_algo.add_subplot(132)
                     ax3=fig_algo.add_subplot(133,projection='3d')
-                # --- 시각화 수정 끝 ---
 
 
                 detected_obstacle_count=0; predicted_boxes_info=[]
                 labels = np.array([])
+                clustering_time_sec = 0.0
 
                 min_samples_for_algo = 1
                 if algorithm_name == "DBSCAN": min_samples_for_algo = model_params["min_samples"]
-                elif algorithm_name == "HDBSCAN": min_samples_for_algo = model_params["min_cluster_size"] # HDBSCAN은 min_cluster_size가 중요
+                elif algorithm_name == "HDBSCAN": min_samples_for_algo = model_params["min_cluster_size"] 
                 elif algorithm_name == "KMEANS": min_samples_for_algo = max(1, model_params["n_clusters"])
                 elif algorithm_name == "GMM": min_samples_for_algo = max(1, model_params["n_components"])
 
@@ -740,18 +755,22 @@ def evaluate_and_plot_algorithms(history, current_gt_obstacle_df, gnd_info, show
                 if len(points_for_algo_input) >= min_samples_for_algo:
                     try:
                         current_algo_model_params = model_params.copy()
-                        if algorithm_name == "KMEANS": current_algo_model_params["n_clusters"] = min(min_samples_for_algo, len(points_for_algo_input)) # n_clusters가 샘플 수보다 클 수 없음
-                        elif algorithm_name == "GMM": current_algo_model_params["n_components"] = min(min_samples_for_algo, len(points_for_algo_input)) # n_components가 샘플 수보다 클 수 없음
+                        if algorithm_name == "KMEANS": current_algo_model_params["n_clusters"] = min(min_samples_for_algo, len(points_for_algo_input)) 
+                        elif algorithm_name == "GMM": current_algo_model_params["n_components"] = min(min_samples_for_algo, len(points_for_algo_input)) 
 
-
+                        # --- 클러스터링 시간 측정 시작 ---
+                        time_start = time.perf_counter()
                         if algorithm_name == "DBSCAN": model = DBSCAN(**current_algo_model_params); labels = model.fit_predict(points_for_algo_input)
-                        elif algorithm_name == "HDBSCAN": model = hdbscan.HDBSCAN(**current_algo_model_params); labels = model.fit_predict(points_for_algo_input) # HDBSCAN 적용
+                        elif algorithm_name == "HDBSCAN": model = hdbscan.HDBSCAN(**current_algo_model_params); labels = model.fit_predict(points_for_algo_input) 
                         elif algorithm_name == "KMEANS": model = KMeans(**current_algo_model_params); labels = model.fit_predict(points_for_algo_input)
                         elif algorithm_name == "GMM": model = GaussianMixture(**current_algo_model_params); labels = model.fit_predict(points_for_algo_input)
+                        clustering_time_sec = time.perf_counter() - time_start
+                        print(f"  {algorithm_name} clustering took: {clustering_time_sec:.4f} sec")
+                        # --- 클러스터링 시간 측정 끝 ---
+
 
                         if labels.size > 0 and len(non_ground_points_orig) == len(labels):
                             unique_labels = set(labels)
-                            # HDBSCAN도 -1을 노이즈로 사용
                             num_clusters = len(unique_labels) - (1 if -1 in labels and algorithm_name in ["DBSCAN", "HDBSCAN"] else 0)
                             if algorithm_name not in ["DBSCAN", "HDBSCAN"]: num_clusters = len(unique_labels)
 
@@ -795,12 +814,10 @@ def evaluate_and_plot_algorithms(history, current_gt_obstacle_df, gnd_info, show
                     ax3.view_init(elev=30.,azim=-60)
                     if detected_obstacle_count > 0 or agent_traj_x: ax3.legend(fontsize='small')
 
-                # gt_boxes_info_for_eval_current_method를 매 평가 방법 루프 시작 시 초기화
                 gt_boxes_info_for_eval_current_method = [gt_info.copy() for gt_info in gt_boxes_info_for_eval]
-                for gt_box_eval in gt_boxes_info_for_eval_current_method: gt_box_eval['is_detected'] = False # is_detected 상태 초기화
+                for gt_box_eval in gt_boxes_info_for_eval_current_method: gt_box_eval['is_detected'] = False 
 
                 tp = 0; fp = 0
-
                 for p_box in predicted_boxes_info: p_box['is_tp'] = False
 
                 if current_eval_method == "3D_IOU":
@@ -900,9 +917,10 @@ def evaluate_and_plot_algorithms(history, current_gt_obstacle_df, gnd_info, show
 
                     eval_text = f"Algorithm: {algorithm_name}, Eval: {eval_method_str_display}{threshold_str}, LiDAR Range:{LIDAR_RANGE}m\n"
                     eval_text += f"  Relevant GT: {len(gt_boxes_info_for_eval_current_method)}, Predicted: {len(predicted_boxes_info)}\n"
-                    eval_text += f"  TP: {tp}, FP: {fp}, FN: {fn}\n  Precision: {precision:.3f}, Recall: {recall:.3f}, F1-Score: {f1_score:.3f}"
-                    fig_algo.text(0.5, 0.02, eval_text, ha='center', va='bottom', fontsize=9, bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.7))
-                else: # 플롯이 생성되지 않은 경우에도 점수는 계산해야 함
+                    eval_text += f"  TP: {tp}, FP: {fp}, FN: {fn}\n  Precision: {precision:.3f}, Recall: {recall:.3f}, F1-Score: {f1_score:.3f}\n"
+                    eval_text += f"  Clustering Time: {clustering_time_sec:.4f} sec"
+                    fig_algo.text(0.5, 0.01, eval_text, ha='center', va='bottom', fontsize=8, bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.7)) # y 위치 및 폰트 크기 조정
+                else: 
                     precision=tp/(tp+fp) if (tp+fp)>0 else 0; recall=tp/(tp+fn) if (tp+fn)>0 else 0
                     f1_score=2*(precision*recall)/(precision+recall) if (precision+recall)>0 else 0
 
@@ -913,6 +931,7 @@ def evaluate_and_plot_algorithms(history, current_gt_obstacle_df, gnd_info, show
                     "EvaluationMethod": current_eval_method,
                     "TP": tp, "FP": fp, "FN": fn,
                     "Precision": round(precision,3), "Recall": round(recall,3), "F1-Score": round(f1_score,3),
+                    "ClusteringTime_sec": round(clustering_time_sec, 4), # 시간 추가
                     "GT_Relevant": len(gt_boxes_info_for_eval_current_method), "Predicted_Boxes": detected_obstacle_count
                 })
 
@@ -943,6 +962,8 @@ def save_performance_summary_to_csv(summary_df, filename="simulation_performance
     summary_df['Timestamp'] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
     summary_df['Seed'] = current_obstacle_seed
     summary_df['TotalSimTime'] = TOTAL_SIMULATION_DURATION
+    summary_df['LiDAR_Noise_Enabled'] = LIDAR_NOISE_ENABLED # 노이즈 설정 추가
+    summary_df['LiDAR_Noise_Level'] = LIDAR_NOISE_LEVEL if LIDAR_NOISE_ENABLED else 0.0 # 노이즈 설정 추가
 
     summary_df['NumInitialObstacles'] = NUM_OBSTACLES
     summary_df['AgentSpeed'] = AGENT_SPEED
@@ -968,6 +989,7 @@ def input(key):
     global scan_history,obstacle_df,movement_states,rotation_states, current_obstacle_seed
     global simulation_running, simulation_time_elapsed, next_dynamic_event_idx, target_destination_world, replanning_needed, current_path_waypoints, current_waypoint_idx, current_destination_timer
     global current_grid_map, path_visualization_entities
+    global LIDAR_NOISE_ENABLED # 전역 변수 접근
 
     if key == 'k':
         if not simulation_running:
@@ -992,7 +1014,7 @@ def input(key):
             visualize_path([])
             if scan_history:
                 print("Saving results after manual stop...")
-                summary_df_results = evaluate_and_plot_algorithms(scan_history, obstacle_df, ground_info, show_plots=True) # M키와 동일하게 동작하도록 show_plots=True
+                summary_df_results = evaluate_and_plot_algorithms(scan_history, obstacle_df, ground_info, show_plots=True) 
                 if summary_df_results is not None and not summary_df_results.empty:
                     save_performance_summary_to_csv(summary_df_results)
                 else:
@@ -1006,6 +1028,12 @@ def input(key):
     if simulation_running:
         if key == 'escape': application.quit()
         return
+
+    if key == 'v': # 노이즈 토글 키
+        LIDAR_NOISE_ENABLED = not LIDAR_NOISE_ENABLED
+        print(f"LiDAR Noise {'ENABLED' if LIDAR_NOISE_ENABLED else 'DISABLED'}")
+        return
+
 
     if key in ('0', '4', '5', '6', '7', '8', '9'):
         new_seed_offset = int(key)
@@ -1022,7 +1050,7 @@ def input(key):
             current_grid_map = GridMap(AREA_SIZE, GRID_CELL_SIZE, obstacle_df, padding_cells=OBSTACLE_PADDING_CELLS)
             visualize_path([])
     elif key == 'n': add_dynamic_obstacle(count=1)
-    elif key == 'x': remove_dynamic_obstacle(count=1, strategy="closest")
+    elif key == 'x': remove_dynamic_obstacle(count=1, strategy="random")
     elif key in ['w','w hold']: movement_states['forward']=True
     elif key=='w up': movement_states['forward']=False
     elif key in ['s','s hold']: movement_states['backward']=True
@@ -1060,6 +1088,7 @@ def input(key):
         ts=time.strftime('%Y%m%d_%H%M%S'); lr_str=str(LIDAR_RANGE).replace('.','_'); ys_str=str(Y_COORD_SCALE_FACTOR).replace('.','_')
         eps_str=str(DBSCAN_EPS).replace('.','_'); min_s_str=str(DBSCAN_MIN_SAMPLES)
         base_filename = f"s{current_obstacle_seed}_lr{lr_str}_{ts}"
+        if LIDAR_NOISE_ENABLED: base_filename += f"_noise{str(LIDAR_NOISE_LEVEL).replace('.', '_')}"
         if scan_history: fn_hist=f"scan_{base_filename}.pkl"; pickle.dump(scan_history,open(fn_hist,'wb')); print(f"Scan history saved: {fn_hist}")
         if obstacle_df is not None and not obstacle_df.empty : fn_obs=f"gt_{base_filename}.csv"; obstacle_df.to_csv(fn_obs,index=False); print(f"GT saved: {fn_obs}")
     elif key=='escape': application.quit()
@@ -1080,7 +1109,6 @@ def update():
             visualize_path([])
             if scan_history:
                 print("Automatically saving results (plots for 2D_AREA_OVERLAP_RATIO if show_plots=True)...")
-                # 자동 종료 시 show_plots=False로 하여 플롯 없이 CSV만 저장하도록 변경 (필요시 True로 변경)
                 summary_df_results = evaluate_and_plot_algorithms(scan_history, obstacle_df, ground_info, show_plots=False)
                 if summary_df_results is not None and not summary_df_results.empty:
                     save_performance_summary_to_csv(summary_df_results)
@@ -1198,12 +1226,9 @@ def update():
         scan_timer -= current_actual_scan_interval
 
     if perform_scan_this_frame:
-        # 스캔 시점의 에이전트 자세 "동결" (이동/회전 로직 이후의 agent 상태)
         frozen_agent_world_pos = agent.world_position
         frozen_agent_world_rotation_y_deg = agent.world_rotation_y
-
         current_pose_for_history = (frozen_agent_world_pos.x, frozen_agent_world_pos.z, math.radians(frozen_agent_world_rotation_y_deg))
-
         add_this_scan = True
         if scan_history:
             last_pose = scan_history[-1]['pose']
@@ -1211,12 +1236,10 @@ def update():
             rot_diff_rad = abs(normalize_angle(current_pose_for_history[2] - last_pose[2]))
             if pos_change < MIN_MOVEMENT_THRESHOLD_FOR_NEW_SCAN and rot_diff_rad < math.radians(MIN_ROTATION_THRESHOLD_FOR_NEW_SCAN_DEG):
                 add_this_scan = False
-
         if add_this_scan:
             rel_pts = generate_relative_lidar_map_3d_at_pose(frozen_agent_world_pos, frozen_agent_world_rotation_y_deg)
             if rel_pts.shape[0] > 0:
                 scan_history.append({'pose': current_pose_for_history, 'relative_points': rel_pts.tolist()})
-
 
     # 3. 시각화 및 정보 업데이트 (항상 실행)
     if VISUALIZE_LIDAR_RAYS: update_lidar_visualization()
@@ -1234,12 +1257,13 @@ def update():
                  sim_status_text += f" WP: {current_waypoint_idx+1}/{len(current_path_waypoints)}"
         sim_status_text += f" Event: {next_dynamic_event_idx}/{len(DYNAMIC_EVENT_SCHEDULE)}"
 
+    noise_status_text = f"LiDAR Noise: {'ON' if LIDAR_NOISE_ENABLED else 'OFF'} (Lvl:{LIDAR_NOISE_LEVEL if LIDAR_NOISE_ENABLED else 'N/A'})"
     info_text.text=( f"Location:({agent.x:.1f},{agent.z:.1f}) RotY:{agent.rotation_y:.0f}° ScanNum:{len(scan_history)}\n"
                     f"Simulation: {sim_status_text} (Seed :{current_obstacle_seed})\n"
-                    f"LiDAR Range:{LIDAR_RANGE}m Eval Methods: {', '.join(POSSIBLE_EVALUATION_METHODS)}\n"
-                    f"K:AutoDrive(Start/Stop) M:Eval&Plot L:Eval&Save(Manual) C:ScanReset P:SaveRaw\n"
+                    f"{noise_status_text} | Eval Methods: {', '.join(POSSIBLE_EVALUATION_METHODS)}\n"
+                    f"K:AutoDrive V:NoiseOnOff M:Eval&Plot L:Eval&Save C:ScanReset P:SaveRaw\n"
                     f"0,4-9:ObsSetting N:AddObs X:DelObs (ManualMode)")
-    info_text.x=-0.5*window.aspect_ratio+0.02; info_text.y=0.38
+    info_text.x=-0.5*window.aspect_ratio+0.02; info_text.y=0.36 # 텍스트 위치 약간 조정
     if mouse.locked:mouse.locked=False
     if not mouse.visible:mouse.visible=True
 
